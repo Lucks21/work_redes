@@ -31,7 +31,7 @@ int main(int argc, char const *argv[]){
         std::cin >> mensaje;
         send(sock,mensaje,strlen(mensaje),0);
         valread = read(sock,buffer,1024);
-        std::cout << buffer << std::endl
+        std::cout << buffer << std::endl;
     }
     close(sock);
     return 0;
