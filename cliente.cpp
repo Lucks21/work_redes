@@ -20,14 +20,23 @@ void recibirMensajes(int socket_cliente) {
         int valread = read(socket_cliente, buffer, 1024);
         if (valread > 0) {
             cout << buffer << endl;
+            if (strstr(buffer, "ha ganado") || strstr(buffer, "empate")) {
+                cout << "El juego ha terminado." << endl;
+                close(socket_cliente);
+                exit(0);
+            }
         }
     }
 }
 
 int main(int argc, char const *argv[]) {
-    int sock = 0, valread;
+    if (argc != 3) {
+        cout << "Uso: ./cliente <direccion_ip> <puerto>" << endl;
+        return -1;
+    }
+
+    int sock = 0;
     struct sockaddr_in serv_addr;
-    char buffer[1024] = {0};
     char mensaje[1024];
 
     if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {

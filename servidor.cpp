@@ -1,6 +1,13 @@
-#include <sys/socket.h>
-#include <arpa/inet.h>
-#include <string.h>    
+/*
+ * servidor.cpp
+ * 
+ * g++ -std=c++11 servidor.cpp -o servidor -lpthread
+ *
+ */
+
+#include <sys/socket.h> // socket()
+#include <arpa/inet.h>  // hton*()
+#include <string.h>     // memset()
 #include <unistd.h> 
 #include <iostream>
 #include <vector>
@@ -18,6 +25,7 @@ public:
     void mostrarTablero();
     bool hacerJugada(int columna);
     bool comprobarGanador();
+    bool comprobarEmpate();
     char obtenerTurno() const;
     std::string obtenerTableroComoString() const;
 
@@ -30,6 +38,7 @@ private:
     bool comprobarDiagonales();
 };
 
+// Implementación de los métodos de la clase CuatroEnLinea
 CuatroEnLinea::CuatroEnLinea() : tablero(6, std::vector<char>(7, ' ')), turno('C') {}
 
 void CuatroEnLinea::mostrarTablero() {
@@ -61,6 +70,17 @@ bool CuatroEnLinea::hacerJugada(int columna) {
 
 bool CuatroEnLinea::comprobarGanador() {
     return comprobarFilas() || comprobarColumnas() || comprobarDiagonales();
+}
+
+bool CuatroEnLinea::comprobarEmpate() {
+    for (const auto& fila : tablero) {
+        for (const auto& celda : fila) {
+            if (celda == ' ') {
+                return false;
+            }
+        }
+    }
+    return true;
 }
 
 char CuatroEnLinea::obtenerTurno() const {
@@ -154,7 +174,9 @@ void manejarCliente(int socket_cliente, struct sockaddr_in direccionCliente) {
     inet_ntop(AF_INET, &(direccionCliente.sin_addr), ip, INET_ADDRSTRLEN);
     cout << "[" << ip << ":" << ntohs(direccionCliente.sin_port) << "] Jugador " << jugadorActual << " ha entrado al juego." << endl;
 
+    // Emparejar jugadores
     if (partidas.empty() || partidas.back().jugador2 != -1) {
+        // Crear una nueva partida
         Partida nuevaPartida;
         nuevaPartida.jugador1 = socket_cliente;
         nuevaPartida.jugador2 = -1;
@@ -163,6 +185,7 @@ void manejarCliente(int socket_cliente, struct sockaddr_in direccionCliente) {
         clienteAPartida[socket_cliente] = partidas.size() - 1;
         enviarMensaje(socket_cliente, "Esperando a otro jugador...\n");
     } else {
+        // Unir al cliente a la última partida creada
         int indicePartida = partidas.size() - 1;
         partidas[indicePartida].jugador2 = socket_cliente;
         clienteAPartida[socket_cliente] = indicePartida;
@@ -174,11 +197,13 @@ void manejarCliente(int socket_cliente, struct sockaddr_in direccionCliente) {
     }
     lock.unlock();
 
+    // Manejar la partida
     char buffer[1024];
     bool ganador = false;
+    bool empate = false;
     int columna;
 
-    while (!ganador) {
+    while (!ganador && !empate) {
         memset(buffer, 0, sizeof(buffer));
         int valread = recv(socket_cliente, buffer, 1024, 0);
         if (valread > 0) {
@@ -193,10 +218,21 @@ void manejarCliente(int socket_cliente, struct sockaddr_in direccionCliente) {
             if (esTurnoJugador1 || esTurnoJugador2) {
                 if (partida.juego.hacerJugada(columna)) {
                     ganador = partida.juego.comprobarGanador();
+                    empate = partida.juego.comprobarEmpate();
                     partida.turnoJugador1 = !partida.turnoJugador1;
                     std::string tableroString = partida.juego.obtenerTableroComoString();
                     enviarMensaje(partida.jugador1, tableroString);
                     enviarMensaje(partida.jugador2, tableroString);
+                    
+                    if (ganador) {
+                        std::string mensajeGanador = "Jugador " + std::to_string(esTurnoJugador1 ? 1 : 2) + " ha ganado!\n";
+                        enviarMensaje(partida.jugador1, mensajeGanador);
+                        enviarMensaje(partida.jugador2, mensajeGanador);
+                    } else if (empate) {
+                        std::string mensajeEmpate = "El juego ha terminado en empate.\n";
+                        enviarMensaje(partida.jugador1, mensajeEmpate);
+                        enviarMensaje(partida.jugador2, mensajeEmpate);
+                    }
                 } else {
                     enviarMensaje(socket_cliente, "Columna no válida. Inténtelo de nuevo.\n");
                 }
@@ -210,6 +246,11 @@ void manejarCliente(int socket_cliente, struct sockaddr_in direccionCliente) {
 }
 
 int main(int argc, char **argv) {
+    if (argc != 2) {
+        cout << "Uso: ./servidor <puerto>" << endl;
+        return -1;
+    }
+
     int port = atoi(argv[1]);
     int socket_server = 0;
     struct sockaddr_in direccionServidor, direccionCliente;
