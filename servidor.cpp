@@ -1,11 +1,14 @@
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <string.h>    
+#include <unistd.h> 
 #include <iostream>
 #include <vector>
 #include <thread>
-#include <netinet/in.h>
-#include <unistd.h>
-#include <cstring>
 #include <mutex>
 #include <unordered_map>
+
+using namespace std;
 
 std::mutex mtx;
 
@@ -142,25 +145,27 @@ void enviarMensaje(int clienteSocket, const std::string& mensaje) {
     send(clienteSocket, mensaje.c_str(), mensaje.length(), 0);
 }
 
-void manejarCliente(int clienteSocket, int jugadorID) {
+void manejarCliente(int socket_cliente, struct sockaddr_in direccionCliente) {
     std::unique_lock<std::mutex> lock(mtx);
-    std::cout << "Jugador " << jugadorID << " ha entrado al juego.\n";
+    static int jugadorID = 1;
+    int jugadorActual = jugadorID++;
+    
+    char ip[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &(direccionCliente.sin_addr), ip, INET_ADDRSTRLEN);
+    cout << "[" << ip << ":" << ntohs(direccionCliente.sin_port) << "] Jugador " << jugadorActual << " ha entrado al juego." << endl;
 
-    // Emparejar jugadores
     if (partidas.empty() || partidas.back().jugador2 != -1) {
-        // Crear una nueva partida
         Partida nuevaPartida;
-        nuevaPartida.jugador1 = clienteSocket;
+        nuevaPartida.jugador1 = socket_cliente;
         nuevaPartida.jugador2 = -1;
         nuevaPartida.turnoJugador1 = true;
         partidas.push_back(nuevaPartida);
-        clienteAPartida[clienteSocket] = partidas.size() - 1;
-        enviarMensaje(clienteSocket, "Esperando a otro jugador...\n");
+        clienteAPartida[socket_cliente] = partidas.size() - 1;
+        enviarMensaje(socket_cliente, "Esperando a otro jugador...\n");
     } else {
-        // Unir al cliente a la última partida creada
         int indicePartida = partidas.size() - 1;
-        partidas[indicePartida].jugador2 = clienteSocket;
-        clienteAPartida[clienteSocket] = indicePartida;
+        partidas[indicePartida].jugador2 = socket_cliente;
+        clienteAPartida[socket_cliente] = indicePartida;
         enviarMensaje(partidas[indicePartida].jugador1, "Jugador 2 se ha unido. Empieza el juego.\n");
         enviarMensaje(partidas[indicePartida].jugador2, "Te has unido. Empieza el juego.\n");
         std::string tableroString = partidas[indicePartida].juego.obtenerTableroComoString();
@@ -169,22 +174,21 @@ void manejarCliente(int clienteSocket, int jugadorID) {
     }
     lock.unlock();
 
-    // Manejar la partida
-    char buffer[1024] = {0};
+    char buffer[1024];
     bool ganador = false;
     int columna;
 
     while (!ganador) {
         memset(buffer, 0, sizeof(buffer));
-        int valread = read(clienteSocket, buffer, 1024);
+        int valread = recv(socket_cliente, buffer, 1024, 0);
         if (valread > 0) {
             columna = std::stoi(buffer);
             lock.lock();
-            int indicePartida = clienteAPartida[clienteSocket];
+            int indicePartida = clienteAPartida[socket_cliente];
             Partida& partida = partidas[indicePartida];
 
-            bool esTurnoJugador1 = partida.turnoJugador1 && clienteSocket == partida.jugador1;
-            bool esTurnoJugador2 = !partida.turnoJugador1 && clienteSocket == partida.jugador2;
+            bool esTurnoJugador1 = partida.turnoJugador1 && socket_cliente == partida.jugador1;
+            bool esTurnoJugador2 = !partida.turnoJugador1 && socket_cliente == partida.jugador2;
 
             if (esTurnoJugador1 || esTurnoJugador2) {
                 if (partida.juego.hacerJugada(columna)) {
@@ -194,52 +198,59 @@ void manejarCliente(int clienteSocket, int jugadorID) {
                     enviarMensaje(partida.jugador1, tableroString);
                     enviarMensaje(partida.jugador2, tableroString);
                 } else {
-                    enviarMensaje(clienteSocket, "Columna no válida. Inténtelo de nuevo.\n");
+                    enviarMensaje(socket_cliente, "Columna no válida. Inténtelo de nuevo.\n");
                 }
             } else {
-                enviarMensaje(clienteSocket, "No es tu turno. Espera tu turno.\n");
+                enviarMensaje(socket_cliente, "No es tu turno. Espera tu turno.\n");
             }
             lock.unlock();
         }
     }
-    close(clienteSocket);
+    close(socket_cliente);
 }
 
-int main(int argc, char const *argv[]) {
-    int servidor_fd, nuevo_socket;
-    struct sockaddr_in direccion;
-    int opt = 1;
-    int addrlen = sizeof(direccion);
+int main(int argc, char **argv) {
+    int port = atoi(argv[1]);
+    int socket_server = 0;
+    struct sockaddr_in direccionServidor, direccionCliente;
 
-    if ((servidor_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
-        perror("Fallo al crear el socket");
+    cout << "Creating listening socket ...\n";
+    if ((socket_server = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+        cout << "Error creating listening socket\n";
         exit(EXIT_FAILURE);
     }
 
-    if (setsockopt(servidor_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt))) {
-        perror("Fallo en setsockopt");
+    cout << "Configuring socket address structure ...\n";
+    memset(&direccionServidor, 0, sizeof(direccionServidor));
+    direccionServidor.sin_family      = AF_INET;
+    direccionServidor.sin_addr.s_addr = htonl(INADDR_ANY);
+    direccionServidor.sin_port        = htons(port);
+
+    cout << "Binding socket ...\n";
+    if (bind(socket_server, (struct sockaddr *) &direccionServidor, sizeof(direccionServidor)) < 0) {
+        cout << "Error calling bind()\n";
         exit(EXIT_FAILURE);
     }
 
-    direccion.sin_family = AF_INET;
-    direccion.sin_addr.s_addr = INADDR_ANY;
-    direccion.sin_port = htons(7777);
-
-    if (bind(servidor_fd, (struct sockaddr *)&direccion, sizeof(direccion)) < 0) {
-        perror("Fallo en bind");
+    cout << "Calling listening ...\n";
+    if (listen(socket_server, 1024) < 0) {
+        cout << "Error calling listen()\n";
         exit(EXIT_FAILURE);
     }
 
-    if (listen(servidor_fd, 3) < 0) {
-        perror("Fallo en listen");
-        exit(EXIT_FAILURE);
-    }
+    socklen_t addr_size = sizeof(struct sockaddr_in);
+    cout << "Waiting client request ...\n";
 
-    std::vector<std::thread> hilos;
-    int jugadorID = 1;
+    vector<thread> hilos;
 
-    while ((nuevo_socket = accept(servidor_fd, (struct sockaddr *)&direccion, (socklen_t*)&addrlen)) >= 0) {
-        hilos.emplace_back(manejarCliente, nuevo_socket, jugadorID++);
+    while (true) {
+        int socket_cliente;
+        if ((socket_cliente = accept(socket_server, (struct sockaddr *)&direccionCliente, &addr_size)) < 0) {
+            cout << "Error calling accept()\n";
+            exit(EXIT_FAILURE);
+        }
+
+        hilos.emplace_back(manejarCliente, socket_cliente, direccionCliente);
     }
 
     for (auto &hilo : hilos) {
