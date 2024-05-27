@@ -10,18 +10,22 @@
 #include <unistd.h>
 #include <cstring>
 #include <thread>
+#include <atomic>
 
 using namespace std;
 
+atomic<bool> juegoTerminado(false);
+
 void recibirMensajes(int socket_cliente) {
     char buffer[1024];
-    while (true) {
+    while (!juegoTerminado) {
         memset(buffer, 0, sizeof(buffer));
         int valread = read(socket_cliente, buffer, 1024);
         if (valread > 0) {
             cout << buffer << endl;
             if (strstr(buffer, "ha ganado") || strstr(buffer, "empate")) {
                 cout << "El juego ha terminado." << endl;
+                juegoTerminado = true;
                 close(socket_cliente);
                 exit(0);
             }
@@ -59,9 +63,12 @@ int main(int argc, char const *argv[]) {
 
     thread recibir(recibirMensajes, sock);
 
-    while (true) {
+    while (!juegoTerminado) {
         cout << "Introduzca la columna (1-7): ";
         cin >> mensaje;
+        if (juegoTerminado) {
+            break;
+        }
         send(sock, mensaje, strlen(mensaje), 0);
     }
 
