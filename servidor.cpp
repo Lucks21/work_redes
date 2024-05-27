@@ -228,10 +228,18 @@ void manejarCliente(int socket_cliente, struct sockaddr_in direccionCliente) {
                         std::string mensajeGanador = "Jugador " + std::to_string(esTurnoJugador1 ? 1 : 2) + " ha ganado!\n";
                         enviarMensaje(partida.jugador1, mensajeGanador);
                         enviarMensaje(partida.jugador2, mensajeGanador);
+                        close(partida.jugador1);
+                        close(partida.jugador2);
+                        clienteAPartida.erase(partida.jugador1);
+                        clienteAPartida.erase(partida.jugador2);
                     } else if (empate) {
                         std::string mensajeEmpate = "El juego ha terminado en empate.\n";
                         enviarMensaje(partida.jugador1, mensajeEmpate);
                         enviarMensaje(partida.jugador2, mensajeEmpate);
+                        close(partida.jugador1);
+                        close(partida.jugador2);
+                        clienteAPartida.erase(partida.jugador1);
+                        clienteAPartida.erase(partida.jugador2);
                     }
                 } else {
                     enviarMensaje(socket_cliente, "Columna no válida. Inténtelo de nuevo.\n");
