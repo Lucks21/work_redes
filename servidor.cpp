@@ -1,13 +1,6 @@
-/*
- * servidor.cpp
- * 
- * g++ -std=c++11 servidor.cpp -o servidor -lpthread
- *
- */
-
-#include <sys/socket.h> // socket()
-#include <arpa/inet.h>  // hton*()
-#include <string.h>     // memset()
+#include <sys/socket.h> 
+#include <arpa/inet.h>  
+#include <string.h>     
 #include <unistd.h> 
 #include <iostream>
 #include <vector>
@@ -38,7 +31,6 @@ private:
     bool comprobarDiagonales();
 };
 
-// Implementación de los métodos de la clase CuatroEnLinea
 CuatroEnLinea::CuatroEnLinea() : tablero(6, std::vector<char>(7, ' ')), turno('C') {}
 
 void CuatroEnLinea::mostrarTablero() {
@@ -174,9 +166,7 @@ void manejarCliente(int socket_cliente, struct sockaddr_in direccionCliente) {
     inet_ntop(AF_INET, &(direccionCliente.sin_addr), ip, INET_ADDRSTRLEN);
     cout << "[" << ip << ":" << ntohs(direccionCliente.sin_port) << "] Jugador " << jugadorActual << " ha entrado al juego." << endl;
 
-    // Emparejar jugadores
     if (partidas.empty() || partidas.back().jugador2 != -1) {
-        // Crear una nueva partida
         Partida nuevaPartida;
         nuevaPartida.jugador1 = socket_cliente;
         nuevaPartida.jugador2 = -1;
@@ -185,7 +175,6 @@ void manejarCliente(int socket_cliente, struct sockaddr_in direccionCliente) {
         clienteAPartida[socket_cliente] = partidas.size() - 1;
         enviarMensaje(socket_cliente, "Esperando a otro jugador...\n");
     } else {
-        // Unir al cliente a la última partida creada
         int indicePartida = partidas.size() - 1;
         partidas[indicePartida].jugador2 = socket_cliente;
         clienteAPartida[socket_cliente] = indicePartida;
@@ -197,7 +186,6 @@ void manejarCliente(int socket_cliente, struct sockaddr_in direccionCliente) {
     }
     lock.unlock();
 
-    // Manejar la partida
     char buffer[1024];
     bool ganador = false;
     bool empate = false;
