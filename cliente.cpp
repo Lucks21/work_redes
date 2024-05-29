@@ -1,3 +1,10 @@
+/*
+ * cliente.cpp
+ * 
+ * g++ -std=c++11 cliente.cpp -o cliente
+ *
+ */
+
 #include <iostream>
 #include <arpa/inet.h>
 #include <unistd.h>
@@ -16,7 +23,7 @@ void recibirMensajes(int socket_cliente) {
         int valread = read(socket_cliente, buffer, 1024);
         if (valread > 0) {
             cout << buffer << endl;
-            if (strstr(buffer, "ha ganado") || strstr(buffer, "empate")) {
+            if (strstr(buffer, "Fin del juego")) {
                 cout << "El juego ha terminado.\n";
                 juegoTerminado = true;
                 close(socket_cliente);

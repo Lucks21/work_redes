@@ -1,12 +1,21 @@
-#include <sys/socket.h> 
-#include <arpa/inet.h>  
-#include <string.h>     
-#include <unistd.h> 
+/*
+ * servidor.cpp
+ * 
+ * g++ -std=c++11 servidor.cpp -o servidor -lpthread
+ *
+ */
+
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <cstring>
 #include <iostream>
 #include <vector>
 #include <thread>
 #include <mutex>
 #include <unordered_map>
+#include <cstdlib>
+#include <ctime>
 
 using namespace std;
 
@@ -31,6 +40,7 @@ private:
     bool comprobarDiagonales();
 };
 
+// Implementación de los métodos de la clase CuatroEnLinea
 CuatroEnLinea::CuatroEnLinea() : tablero(6, std::vector<char>(7, ' ')), turno('C') {}
 
 void CuatroEnLinea::mostrarTablero() {
@@ -143,48 +153,15 @@ bool CuatroEnLinea::comprobarDiagonales() {
     return false;
 }
 
-struct Partida {
-    CuatroEnLinea juego;
-    int jugador1;
-    int jugador2;
-    bool turnoJugador1;
-};
-
-std::vector<Partida> partidas;
-std::unordered_map<int, int> clienteAPartida;
-
 void enviarMensaje(int clienteSocket, const std::string& mensaje) {
     send(clienteSocket, mensaje.c_str(), mensaje.length(), 0);
 }
 
 void manejarCliente(int socket_cliente, struct sockaddr_in direccionCliente) {
-    std::unique_lock<std::mutex> lock(mtx);
-    static int jugadorID = 1;
-    int jugadorActual = jugadorID++;
-    
-    char ip[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &(direccionCliente.sin_addr), ip, INET_ADDRSTRLEN);
-    cout << "[" << ip << ":" << ntohs(direccionCliente.sin_port) << "] Jugador " << jugadorActual << " ha entrado al juego." << endl;
-
-    if (partidas.empty() || partidas.back().jugador2 != -1) {
-        Partida nuevaPartida;
-        nuevaPartida.jugador1 = socket_cliente;
-        nuevaPartida.jugador2 = -1;
-        nuevaPartida.turnoJugador1 = true;
-        partidas.push_back(nuevaPartida);
-        clienteAPartida[socket_cliente] = partidas.size() - 1;
-        enviarMensaje(socket_cliente, "Esperando a otro jugador...\n");
-    } else {
-        int indicePartida = partidas.size() - 1;
-        partidas[indicePartida].jugador2 = socket_cliente;
-        clienteAPartida[socket_cliente] = indicePartida;
-        enviarMensaje(partidas[indicePartida].jugador1, "Jugador 2 se ha unido. Empieza el juego.\n");
-        enviarMensaje(partidas[indicePartida].jugador2, "Te has unido. Empieza el juego.\n");
-        std::string tableroString = partidas[indicePartida].juego.obtenerTableroComoString();
-        enviarMensaje(partidas[indicePartida].jugador1, tableroString);
-        enviarMensaje(partidas[indicePartida].jugador2, tableroString);
-    }
-    lock.unlock();
+    CuatroEnLinea juego;
+    srand(time(0));
+    bool esTurnoCliente = rand() % 2 == 0;
+    enviarMensaje(socket_cliente, esTurnoCliente ? "Tu turno\n" : "Turno del servidor\n");
 
     char buffer[1024];
     bool ganador = false;
@@ -192,52 +169,41 @@ void manejarCliente(int socket_cliente, struct sockaddr_in direccionCliente) {
     int columna;
 
     while (!ganador && !empate) {
-        memset(buffer, 0, sizeof(buffer));
-        int valread = recv(socket_cliente, buffer, 1024, 0);
-        if (valread > 0) {
-            columna = std::stoi(buffer);
-            lock.lock();
-            int indicePartida = clienteAPartida[socket_cliente];
-            Partida& partida = partidas[indicePartida];
-
-            bool esTurnoJugador1 = partida.turnoJugador1 && socket_cliente == partida.jugador1;
-            bool esTurnoJugador2 = !partida.turnoJugador1 && socket_cliente == partida.jugador2;
-
-            if (esTurnoJugador1 || esTurnoJugador2) {
-                if (partida.juego.hacerJugada(columna)) {
-                    ganador = partida.juego.comprobarGanador();
-                    empate = partida.juego.comprobarEmpate();
-                    partida.turnoJugador1 = !partida.turnoJugador1;
-                    std::string tableroString = partida.juego.obtenerTableroComoString();
-                    enviarMensaje(partida.jugador1, tableroString);
-                    enviarMensaje(partida.jugador2, tableroString);
-                    
-                    if (ganador) {
-                        std::string mensajeGanador = "Jugador " + std::to_string(esTurnoJugador1 ? 1 : 2) + " ha ganado!\n";
-                        enviarMensaje(partida.jugador1, mensajeGanador);
-                        enviarMensaje(partida.jugador2, mensajeGanador);
-                        close(partida.jugador1);
-                        close(partida.jugador2);
-                        clienteAPartida.erase(partida.jugador1);
-                        clienteAPartida.erase(partida.jugador2);
-                    } else if (empate) {
-                        std::string mensajeEmpate = "El juego ha terminado en empate.\n";
-                        enviarMensaje(partida.jugador1, mensajeEmpate);
-                        enviarMensaje(partida.jugador2, mensajeEmpate);
-                        close(partida.jugador1);
-                        close(partida.jugador2);
-                        clienteAPartida.erase(partida.jugador1);
-                        clienteAPartida.erase(partida.jugador2);
-                    }
+        if (esTurnoCliente) {
+            memset(buffer, 0, sizeof(buffer));
+            int valread = recv(socket_cliente, buffer, 1024, 0);
+            if (valread > 0) {
+                columna = std::stoi(buffer);
+                if (juego.hacerJugada(columna)) {
+                    ganador = juego.comprobarGanador();
+                    empate = juego.comprobarEmpate();
+                    esTurnoCliente = false;
+                    std::string tableroString = juego.obtenerTableroComoString();
+                    enviarMensaje(socket_cliente, tableroString);
                 } else {
                     enviarMensaje(socket_cliente, "Columna no válida. Inténtelo de nuevo.\n");
                 }
-            } else {
-                enviarMensaje(socket_cliente, "No es tu turno. Espera tu turno.\n");
             }
-            lock.unlock();
+        } else {
+            // Lógica del turno del servidor
+            do {
+                columna = rand() % 7 + 1; // Generar columna aleatoria
+            } while (!juego.hacerJugada(columna));
+            ganador = juego.comprobarGanador();
+            empate = juego.comprobarEmpate();
+            esTurnoCliente = true;
+            std::string tableroString = juego.obtenerTableroComoString();
+            enviarMensaje(socket_cliente, tableroString);
+            enviarMensaje(socket_cliente, "Tu turno\n");
+        }
+
+        if (ganador) {
+            enviarMensaje(socket_cliente, "Fin del juego, alguien ha ganado\n");
+        } else if (empate) {
+            enviarMensaje(socket_cliente, "Fin del juego, empate\n");
         }
     }
+
     close(socket_cliente);
 }
 
@@ -251,39 +217,39 @@ int main(int argc, char **argv) {
     int socket_server = 0;
     struct sockaddr_in direccionServidor, direccionCliente;
 
-    cout << "Creating listening socket ...\n";
+    cout << "Creando socket de escucha...\n";
     if ((socket_server = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-        cout << "Error creating listening socket\n";
+        cout << "Error al crear el socket de escucha\n";
         exit(EXIT_FAILURE);
     }
 
-    cout << "Configuring socket address structure ...\n";
+    cout << "Configurando estructura de dirección del socket...\n";
     memset(&direccionServidor, 0, sizeof(direccionServidor));
-    direccionServidor.sin_family      = AF_INET;
+    direccionServidor.sin_family = AF_INET;
     direccionServidor.sin_addr.s_addr = htonl(INADDR_ANY);
-    direccionServidor.sin_port        = htons(port);
+    direccionServidor.sin_port = htons(port);
 
-    cout << "Binding socket ...\n";
-    if (bind(socket_server, (struct sockaddr *) &direccionServidor, sizeof(direccionServidor)) < 0) {
-        cout << "Error calling bind()\n";
+    cout << "Vinculando socket...\n";
+    if (bind(socket_server, (struct sockaddr *)&direccionServidor, sizeof(direccionServidor)) < 0) {
+        cout << "Error en bind()\n";
         exit(EXIT_FAILURE);
     }
 
-    cout << "Calling listening ...\n";
+    cout << "Llamando a listen...\n";
     if (listen(socket_server, 1024) < 0) {
-        cout << "Error calling listen()\n";
+        cout << "Error en listen()\n";
         exit(EXIT_FAILURE);
     }
 
     socklen_t addr_size = sizeof(struct sockaddr_in);
-    cout << "Waiting client request ...\n";
+    cout << "Esperando solicitud de cliente...\n";
 
     vector<thread> hilos;
 
     while (true) {
         int socket_cliente;
         if ((socket_cliente = accept(socket_server, (struct sockaddr *)&direccionCliente, &addr_size)) < 0) {
-            cout << "Error calling accept()\n";
+            cout << "Error en accept()\n";
             exit(EXIT_FAILURE);
         }
 
